@@ -19,6 +19,10 @@ uses a fresh `runuser` session so newly granted groups apply immediately. It doe
 change the permissions of `/dev/kvm`, disable AppArmor/SELinux, expose a Docker socket,
 or create a passwordless sudo rule for the lab account.
 
+The operator wrapper explicitly selects the lab account's config/data/cache directories
+and installed command path. It does not inherit another account's container-storage
+configuration when invoked through sudo or an automation runner.
+
 ## Diagnose one layer at a time
 
 ```bash

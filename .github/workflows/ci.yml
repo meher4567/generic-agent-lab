@@ -38,7 +38,7 @@ jobs:
       - name: Install the actual Ubuntu host setup
         run: sudo bash scripts/bootstrap-ubuntu.sh --install-only
       - name: Run real rootless sandbox validation
-        run: sudo agentlab validate --profile sandbox
+        run: sudo env XDG_CONFIG_HOME=/root/operator-config XDG_DATA_HOME=/root/operator-data agentlab validate --profile sandbox
       - name: Confirm installer reruns cleanly
         run: |
           sudo mkdir -p /opt/generic-agent-lab/source/build
@@ -53,6 +53,8 @@ jobs:
         run: |
           lab_uid=$(id -u agentlab)
           sudo runuser -u agentlab -- env \
+            XDG_CONFIG_HOME=/home/agentlab/.config XDG_DATA_HOME=/home/agentlab/.local/share \
+            XDG_CACHE_HOME=/home/agentlab/.cache \
             XDG_RUNTIME_DIR="/run/user/$lab_uid" \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$lab_uid/bus" \
             podman --log-level=debug info

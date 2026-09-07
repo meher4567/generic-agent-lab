@@ -111,7 +111,8 @@ python3 -m venv "$install_dir/venv"
 "$install_dir/venv/bin/python" -m pip install --require-hashes -r "$install_dir/source/requirements.lock"
 "$install_dir/venv/bin/python" -m pip install --no-deps --no-build-isolation "$install_dir/source"
 runtime="$lab_home/.local/share/generic-agent-lab"
-install -d -m 0700 -o "$lab_user" -g "$lab_group" "$lab_home/.local" "$lab_home/.local/share" "$runtime"
+install -d -m 0700 -o "$lab_user" -g "$lab_group" "$lab_home/.local" "$lab_home/.local/share" \
+  "$lab_home/.config" "$lab_home/.cache" "$runtime"
 vm_storage=/var/lib/libvirt/images/generic-agent-lab
 if [[ -e $vm_storage && $(stat -c %U "$vm_storage") != "$lab_user" ]]; then
   echo '[FAIL] VM storage exists with another owner; refusing to change its ownership.'
@@ -131,6 +132,9 @@ fi
 lab_uid=$(id -u agentlab)
 cd /opt/generic-agent-lab/source
 exec runuser -u agentlab -- env \
+  PATH=/opt/generic-agent-lab/venv/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  XDG_CONFIG_HOME=/home/agentlab/.config XDG_DATA_HOME=/home/agentlab/.local/share \
+  XDG_CACHE_HOME=/home/agentlab/.cache \
   XDG_RUNTIME_DIR="/run/user/$lab_uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$lab_uid/bus" \
   LAB_ROOT=/home/agentlab/.local/share/generic-agent-lab \
   LAB_VM_STORAGE=/var/lib/libvirt/images/generic-agent-lab \
@@ -153,6 +157,9 @@ SupplementaryGroups=libvirt kvm
 Environment=LAB_ROOT=$runtime
 Environment=LAB_VM_STORAGE=$vm_storage
 Environment=XDG_RUNTIME_DIR=/run/user/$lab_uid
+Environment=XDG_CONFIG_HOME=$lab_home/.config
+Environment=XDG_DATA_HOME=$lab_home/.local/share
+Environment=XDG_CACHE_HOME=$lab_home/.cache
 WorkingDirectory=$install_dir/source
 ExecStart=$install_dir/venv/bin/labctl vm reap
 UMask=0077
