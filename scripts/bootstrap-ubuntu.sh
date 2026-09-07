@@ -65,7 +65,7 @@ apt-get update
 apt-get install -y git python3 python3-venv python3-pip jq curl openssh-client rsync \
   qemu-kvm qemu-utils libvirt-daemon-system libvirt-clients virtinst cloud-image-utils \
   podman uidmap fuse-overlayfs slirp4netns dbus-user-session libosinfo-bin osinfo-db \
-  ubuntu-cloudimage-keyring gpgv cpu-checker make shellcheck
+  ubuntu-cloudimage-keyring gpgv cpu-checker make shellcheck acl
 
 phase=account
 if ! id "$lab_user" >/dev/null 2>&1; then
@@ -98,6 +98,7 @@ virsh --connect qemu:///system net-autostart default
 
 phase=application
 install -d -m 0755 "$install_dir" "$install_dir/source"
+setfacl -b -k "$install_dir" "$install_dir/source"
 touch "$install_dir/.managed"
 rsync -a --delete --delete-excluded \
   --exclude='__pycache__' --exclude='*.pyc' \
@@ -106,6 +107,7 @@ rsync -a --delete --delete-excluded \
   --include='/requirements.lock' --include='/README.md' --include='/LICENSE' \
   --exclude='*' "$repo_dir/" "$install_dir/source/"
 chown -R root:root "$install_dir/source"
+setfacl -R -b -k "$install_dir/source"
 chmod -R a+rX,go-w "$install_dir/source"
 python3 -m venv "$install_dir/venv"
 "$install_dir/venv/bin/python" -m pip install --require-hashes -r "$install_dir/source/requirements.lock"
@@ -118,13 +120,18 @@ if [[ -e $storage_config ]] && ! grep -q 'Managed by generic-agent-lab' "$storag
   echo '[FAIL] The lab account already has an unmanaged container storage configuration.'
   exit 1
 fi
-install -d -m 0700 -o "$lab_user" -g "$lab_group" "$lab_home/.config/containers" "$runtime/containers-vfs"
+install -d -m 0700 -o "$lab_user" -g "$lab_group" "$lab_home/.config/containers" "$runtime/containers"
+# Host default ACLs can name users outside the container's subordinate ID map.
+# Clear them only on managed directory roots, before any image is extracted.
+# Never recurse through writable job data or alter a parent/shared directory.
+setfacl -b -k "$runtime" "$lab_home/.config/containers" "$runtime/containers"
+chmod 0700 "$runtime" "$lab_home/.config/containers" "$runtime/containers"
 cat > "$storage_config" <<STORAGE
 # Managed by generic-agent-lab
 [storage]
-driver = "vfs"
+driver = "overlay"
 runroot = "/run/user/$lab_uid/containers"
-graphroot = "$runtime/containers-vfs"
+graphroot = "$runtime/containers"
 STORAGE
 chown "$lab_user:$lab_group" "$storage_config"
 chmod 0600 "$storage_config"
@@ -134,6 +141,8 @@ if [[ -e $vm_storage && $(stat -c %U "$vm_storage") != "$lab_user" ]]; then
   exit 1
 fi
 install -d -m 0711 -o "$lab_user" -g "$lab_group" "$vm_storage"
+setfacl -b -k "$vm_storage"
+chmod 0711 "$vm_storage"
 
 # This wrapper is an operator entry point. It grants no sudo rights to agentlab.
 cat > /usr/local/bin/agentlab <<'WRAPPER'
