@@ -1,0 +1,11 @@
+FROM docker.io/library/ubuntu:24.04
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates git patch python3 python3-pytest python3-build \
+    python3-setuptools python3-wheel ripgrep coreutils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY containers/build-toy.py /opt/lab/build-toy.py
+WORKDIR /job
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+CMD ["sleep", "infinity"]

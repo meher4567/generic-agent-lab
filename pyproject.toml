@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "generic-agent-lab"
+version = "0.1.0"
+description = "Repeatable rootless sandbox and KVM infrastructure validation lab"
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2.11,<3", "typer>=0.16,<1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<9", "ruff>=0.12,<1", "build>=1.2,<2", "setuptools==80.9.0", "wheel==0.45.1"]
+
+[project.scripts]
+labctl = "agentlab.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["agentlab*"]
+
+[tool.setuptools.package-data]
+agentlab = ["fixtures/**/*", "fixtures/**/.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "integration: requires real rootless Podman and the lab sandbox image",
+  "kvm: requires a provisioned Ubuntu host with real KVM/libvirt",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

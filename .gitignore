@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.env
+.env.*
+!.env.example
+/.local/
+/runtime/
+/reports/
+/artifacts/
+/vm-images/
+*.qcow2
+*.img
+*.iso
+*.log
+*.pem
+*.key
+id_ed25519*
+id_rsa*
+# The original planning document is local input, not a public deliverable.
+/Generic_Agent_Lab_Infrastructure_Setup_and_Tool_Validation_Guide.md
