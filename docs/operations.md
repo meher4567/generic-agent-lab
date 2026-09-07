@@ -23,6 +23,11 @@ The operator wrapper explicitly selects the lab account's config/data/cache dire
 and installed command path. It does not inherit another account's container-storage
 configuration when invoked through sudo or an automation runner.
 
+The dedicated account uses `fuse-overlayfs` with a lab-only storage directory under
+the runtime. This keeps rootless image filesystem behavior consistent across Ubuntu
+hosts. Existing unmanaged container configuration is not overwritten. Installation
+does not reset or delete another account's Podman storage.
+
 ## Diagnose one layer at a time
 
 ```bash

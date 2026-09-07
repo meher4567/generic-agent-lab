@@ -113,6 +113,23 @@ python3 -m venv "$install_dir/venv"
 runtime="$lab_home/.local/share/generic-agent-lab"
 install -d -m 0700 -o "$lab_user" -g "$lab_group" "$lab_home/.local" "$lab_home/.local/share" \
   "$lab_home/.config" "$lab_home/.cache" "$runtime"
+storage_config="$lab_home/.config/containers/storage.conf"
+if [[ -e $storage_config ]] && ! grep -q 'Managed by generic-agent-lab' "$storage_config"; then
+  echo '[FAIL] The lab account already has an unmanaged container storage configuration.'
+  exit 1
+fi
+install -d -m 0700 -o "$lab_user" -g "$lab_group" "$lab_home/.config/containers" "$runtime/containers"
+cat > "$storage_config" <<STORAGE
+# Managed by generic-agent-lab
+[storage]
+driver = "overlay"
+runroot = "/run/user/$lab_uid/containers"
+graphroot = "$runtime/containers"
+[storage.options.overlay]
+mount_program = "/usr/bin/fuse-overlayfs"
+STORAGE
+chown "$lab_user:$lab_group" "$storage_config"
+chmod 0600 "$storage_config"
 vm_storage=/var/lib/libvirt/images/generic-agent-lab
 if [[ -e $vm_storage && $(stat -c %U "$vm_storage") != "$lab_user" ]]; then
   echo '[FAIL] VM storage exists with another owner; refusing to change its ownership.'

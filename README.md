@@ -144,8 +144,9 @@ LAB_RUN_INTEGRATION=1 .venv/bin/pytest -q tests/integration/test_sandbox.py
 ```
 
 Real KVM pytest coverage is opt-in with `LAB_RUN_KVM=1`. The regular full CLI validation
-already performs those real VM checks. Hosted CI checks software and real containers;
-it does not claim that a hosted runner proves three-VM KVM capacity.
+already performs those real VM checks. Hosted CI checks software and real containers,
+then attempts the full three-VM validation only when every host prerequisite passes.
+A runner without those capabilities retains a scoped `PARTIAL` result.
 
 The Python dependencies are pinned with hashes in `requirements.lock`; `uv.lock` is the
 maintainer lock. The official cloud image is signature-checked with Ubuntu's packaged

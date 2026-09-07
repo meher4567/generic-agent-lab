@@ -25,7 +25,8 @@ host does not meet the documented full acceptance OS/resource requirements.
 
 GitHub Actions separately runs the Ubuntu installer, checks that installation can be
 repeated, and runs the real rootless sandbox suite. Consult the workflow result for the
-exact commit being reviewed. Hosted CI does not substitute for full three-VM validation.
+exact commit being reviewed. CI also runs the full three-VM profile when the runner's
+host checks pass; otherwise that scope remains unverified.
 
 Local detailed reports and keys are excluded from the repository. Run `scripts/start.sh`
 on the target Ubuntu host to generate your own evidence and readiness decision.

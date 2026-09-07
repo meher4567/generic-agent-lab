@@ -39,6 +39,13 @@ jobs:
         run: sudo bash scripts/bootstrap-ubuntu.sh --install-only
       - name: Run real rootless sandbox validation
         run: sudo env XDG_CONFIG_HOME=/root/operator-config XDG_DATA_HOME=/root/operator-data agentlab validate --profile sandbox
+      - name: Run full three-VM validation when the host supports it
+        run: |
+          if sudo agentlab doctor --json; then
+            sudo agentlab validate --profile full
+          else
+            echo 'Full VM acceptance unavailable on this runner; the sandbox result remains PARTIAL.'
+          fi
       - name: Confirm installer reruns cleanly
         run: |
           sudo mkdir -p /opt/generic-agent-lab/source/build
