@@ -3,9 +3,15 @@
 A same-machine clone validates packaging; a second host run validates the target
 environment. Do not treat those as equivalent evidence.
 
+Full validation has already passed on two separate fresh Ubuntu hosted runner instances
+at the same commit; see the [validation record](validation-status.md). Use the steps
+below to establish the result on your own target machines.
+
 On a separate Ubuntu 24.04 x86_64 machine with the documented resources:
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y git
 git clone https://github.com/meher4567/generic-agent-lab.git
 cd generic-agent-lab
 git rev-parse HEAD

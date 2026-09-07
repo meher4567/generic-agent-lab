@@ -5,6 +5,10 @@ One command to install an Ubuntu lab and find out whether the environment actual
 This project tests infrastructure for a future engineering agent using a harmless Python
 fixture. It includes no model, API key requirement, production source, or product-specific workload.
 
+The full Ubuntu workflow has passed 101 checks with three real KVM guests on each of
+two separate Ubuntu runner instances. See the
+[validation record](docs/validation-status.md) for the tested revision and CI evidence.
+
 ## Start on a clean Ubuntu host
 
 Use **Ubuntu 24.04 LTS, x86_64**, with hardware or nested virtualization enabled.
@@ -14,6 +18,8 @@ storage filesystems, and approximately 5.5 GiB currently available RAM for three
 If both paths share one filesystem, the 80 GiB requirement is not additive.
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y git
 git clone https://github.com/meher4567/generic-agent-lab.git
 cd generic-agent-lab
 ./scripts/start.sh
