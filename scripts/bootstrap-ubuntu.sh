@@ -118,15 +118,13 @@ if [[ -e $storage_config ]] && ! grep -q 'Managed by generic-agent-lab' "$storag
   echo '[FAIL] The lab account already has an unmanaged container storage configuration.'
   exit 1
 fi
-install -d -m 0700 -o "$lab_user" -g "$lab_group" "$lab_home/.config/containers" "$runtime/containers"
+install -d -m 0700 -o "$lab_user" -g "$lab_group" "$lab_home/.config/containers" "$runtime/containers-vfs"
 cat > "$storage_config" <<STORAGE
 # Managed by generic-agent-lab
 [storage]
-driver = "overlay"
+driver = "vfs"
 runroot = "/run/user/$lab_uid/containers"
-graphroot = "$runtime/containers"
-[storage.options.overlay]
-mount_program = "/usr/bin/fuse-overlayfs"
+graphroot = "$runtime/containers-vfs"
 STORAGE
 chown "$lab_user:$lab_group" "$storage_config"
 chmod 0600 "$storage_config"

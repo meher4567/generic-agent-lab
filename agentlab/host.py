@@ -67,7 +67,8 @@ def verify_host(store: Store, profile: str = "full", vm_count: int = 3, on_check
         info = json.loads(checked(["podman", "info", "--format", "json"], separate_stderr=True).output)
         require(info["host"]["security"]["rootless"], "Podman must run rootlessly")
         require(info["host"]["cgroupVersion"] == "v2", "Cgroups v2 is required for resource limits")
-        return {"rootless": True, "cgroup_version": "v2", "version": info["version"]["Version"]}
+        return {"rootless": True, "cgroup_version": "v2", "version": info["version"]["Version"],
+                "storage_driver": info["store"]["graphDriverName"]}
     check("host.rootless_podman", podman_info, "Run bootstrap and use a fresh login/session for the lab user.")
     username = pwd.getpwuid(os.getuid()).pw_name
     for kind in ("subuid", "subgid"):
