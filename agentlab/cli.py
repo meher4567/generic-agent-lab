@@ -79,7 +79,7 @@ def validate(profile: Profile = Profile.full, vm_count: int = typer.Option(3, mi
 
 
 @app.command()
-def report():
+def report(details: bool = False):
     """Print the latest validation result and report paths."""
     store = Store()
     pointer = store.root / "reports/latest.json"
@@ -87,6 +87,9 @@ def report():
         raise typer.BadParameter("No report yet; run labctl validate")
     latest = json.loads(pointer.read_text())
     folder = store.root / "reports" / latest["run_id"]
+    if details:
+        emit(json.loads((folder / "report.json").read_text()))
+        return
     emit({**latest, "json": str(folder / "report.json"), "html": str(folder / "report.html"),
           "markdown": str(folder / "summary.md")})
 

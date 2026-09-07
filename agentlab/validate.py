@@ -46,11 +46,18 @@ class Validation:
             print(f"[PASS] {name}", flush=True)
             return value
         except Exception as exc:
+            diagnostic = ""
+            if isinstance(exc, LabError):
+                diagnostic = (exc.data.get("output", "") + exc.data.get("stderr", "")).strip()
+            failure_log = f"failure-{len(self.rows) + 1}.log"
+            (self.folder / failure_log).write_text(str(exc) + "\n" + diagnostic)
             self.rows.append({"name": name, "status": "FAIL", "evidence": str(exc),
                               "code": exc.code if isinstance(exc, LabError) else type(exc).__name__,
-                              "details": exc.data if isinstance(exc, LabError) else {},
+                              "details": exc.data if isinstance(exc, LabError) else {}, "log": failure_log,
                               "duration": round(time.monotonic() - start, 3), "simulated": simulated})
             print(f"[FAIL] {name}: {exc}", flush=True)
+            if diagnostic:
+                print(diagnostic[-4000:], flush=True)
             return None
         finally:
             done.set()

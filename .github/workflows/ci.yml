@@ -47,10 +47,11 @@ jobs:
           test ! -e /opt/generic-agent-lab/source/build/stale-module.txt
       - name: Show report
         if: always()
-        run: sudo agentlab report
+        run: sudo agentlab report --details
       - name: Show rootless startup diagnostics on failure
         if: failure()
         run: |
+          cd /opt/generic-agent-lab/source
           lab_uid=$(id -u agentlab)
           sudo runuser -u agentlab -- env \
             XDG_CONFIG_HOME=/home/agentlab/.config XDG_DATA_HOME=/home/agentlab/.local/share \
