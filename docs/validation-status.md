@@ -1,5 +1,26 @@
 # Validation status
 
+## Error handling update
+
+Commit `576aa3a3603ca2f45402452dea6618a17d82c465` passed the
+[Ubuntu validation workflow](https://github.com/meher4567/generic-agent-lab/actions/runs/34158445245):
+
+- 68 software/fault tests on Python 3.10, 3.12, and 3.13.
+- Actual Ubuntu installation, rootless sandbox validation, and clean repeat installation.
+- 101 full-profile checks: all PASS, zero failures, skips, or warnings; three real
+  concurrent KVM guests and `environment_ready: true`.
+- Both the installed diagnostic command and standalone setup-failure diagnostic collector.
+- Local real Podman integration tests: 2 passed; the full local sandbox workflow also passed.
+
+The additional regression tests cover interrupted/explicitly failed setup, corrupt
+state, full-disk report persistence, emergency report fallback, busy locks, VM readiness
+evidence, failed container shutdown, event/build logging failures, cleanup with corrupt
+records, already-cleaned VM history with an unavailable hypervisor, and diagnostic
+redaction/file exclusions. The standalone collector was also exercised with third-party
+Python packages disabled.
+
+## Initial clean-host reproduction evidence
+
 Implementation validation performed on 2026-09-08:
 
 | Scope | Result |
