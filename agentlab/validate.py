@@ -5,14 +5,18 @@ import json
 import os
 import signal
 import sys
+import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path
 
+from .diagnostics import redact, scrub
 from .host import verify_host
 from .models import LabError
 from .policy import read_file, sha256
 from .process import checked, run
+from .recovery import error_code, operator_command, recovery
 from .registry import Registry
 from .sandbox import SANDBOX_IMAGE, Sandbox
 from .store import Store, atomic_json, new_id, now
@@ -20,14 +24,36 @@ from .vm import MAX_VMS, VMBroker
 
 
 class Validation:
-    def __init__(self, store: Store, profile: str, vm_count: int = 3):
+    def __init__(self, store: Store, profile: str, vm_count: int = 3, vm_timeout: int = 240):
         self.store, self.profile, self.vm_count = store, profile, vm_count
+        self.vm_timeout = vm_timeout
         self.registry = Registry(store)
         self.rows: list[dict] = []
         self.jobs: list[str] = []
         self.folder = store.root / "reports" / new_id("RUN")
         self.folder.mkdir(mode=0o700)
         self.started = now()
+        self.emergency_report: str | None = None
+
+    def failed(self, name: str, exc: Exception, *, simulated: bool = False, duration: float = 0):
+        code = error_code(exc)
+        details = scrub(exc.data) if isinstance(exc, LabError) else {}
+        message = redact(str(exc))
+        advice = recovery(code, message + " " + str(details), step=name)
+        failure_log = f"failure-{len(self.rows) + 1}.log"
+        row = {"name": name, "status": "FAIL", "evidence": message, "code": code,
+               "details": details, "duration": duration, "simulated": simulated, **advice}
+        self.rows.append(row)
+        try:
+            (self.folder / failure_log).write_text(redact(traceback.format_exc()) + "\n" + json.dumps(details, indent=2))
+            row["log"] = failure_log
+        except OSError as log_error:
+            row["logging_error"] = str(log_error)
+        print(f"[FAIL] {name} [{code}]: {message}", flush=True)
+        print(f"       Next: {advice['remediation']}", flush=True)
+        diagnostic = str(details.get("output", "")) + str(details.get("stderr", ""))
+        if diagnostic.strip():
+            print(diagnostic[-4000:], flush=True)
 
     def step(self, name: str, action, *, simulated: bool = False):
         print(f"[RUN ] {name}", flush=True)
@@ -46,18 +72,7 @@ class Validation:
             print(f"[PASS] {name}", flush=True)
             return value
         except Exception as exc:
-            diagnostic = ""
-            if isinstance(exc, LabError):
-                diagnostic = (exc.data.get("output", "") + exc.data.get("stderr", "")).strip()
-            failure_log = f"failure-{len(self.rows) + 1}.log"
-            (self.folder / failure_log).write_text(str(exc) + "\n" + diagnostic)
-            self.rows.append({"name": name, "status": "FAIL", "evidence": str(exc),
-                              "code": exc.code if isinstance(exc, LabError) else type(exc).__name__,
-                              "details": exc.data if isinstance(exc, LabError) else {}, "log": failure_log,
-                              "duration": round(time.monotonic() - start, 3), "simulated": simulated})
-            print(f"[FAIL] {name}: {exc}", flush=True)
-            if diagnostic:
-                print(diagnostic[-4000:], flush=True)
+            self.failed(name, exc, simulated=simulated, duration=round(time.monotonic() - start, 3))
             return None
         finally:
             done.set()
@@ -262,7 +277,8 @@ print('kernel memory/CPU/PID limits, noexec tmpfs, no-new-privileges, zero capab
             self.skip("vm.quota_enforced", "Real three-VM quota boundary requires --vm-count 3")
         for index, vm in enumerate(machines, 1):
             args = {"job_id": job_id, "vm_id": vm["vm_id"]}
-            ready = self.step(f"vm.{index}.dhcp_ssh_cloud_init", lambda a=args: self.call("vm_wait", **a))
+            ready = self.step(f"vm.{index}.dhcp_ssh_cloud_init", lambda a=args:
+                              self.call("vm_wait", timeout=self.vm_timeout, **a))
             if ready:
                 self.step(f"vm.{index}.profile_limits", lambda r=ready: self.assertion(
                     r["ram_mib"] == 1536 and r["vcpus"] == 1))
@@ -286,15 +302,17 @@ print('kernel memory/CPU/PID limits, noexec tmpfs, no-new-privileges, zero capab
                 self.step(f"fault.{fault.lower()}", inject, simulated=True)
 
     def cleanup(self):
-        vm = VMBroker(self.store)
         for job_id in self.jobs:
-            for record in vm.records():
-                if record["job_id"] == job_id:
-                    self.step(f"cleanup.{record['vm_id']}", lambda r=record:
-                              self.call("vm_destroy", job_id=r["job_id"], vm_id=r["vm_id"]))
+            try:
+                folders = sorted((self.store.job(job_id) / "vm").glob("VM-*"))
+                for folder in folders:
+                    self.step(f"cleanup.{folder.name}", lambda vm_id=folder.name:
+                              self.call("vm_destroy", job_id=job_id, vm_id=vm_id))
+            except Exception as exc:
+                self.failed(f"cleanup.enumerate.{job_id}", exc)
             self.step(f"cleanup.sandbox.{job_id}", lambda j=job_id: self.call("sandbox_destroy", job_id=j))
 
-    def write_report(self, finished: bool = False) -> dict:
+    def report_data(self, finished: bool) -> dict:
         failed = any(r["status"] == "FAIL" for r in self.rows)
         skipped = any(r["status"] == "SKIP" for r in self.rows)
         ready = finished and self.profile == "full" and self.vm_count == 3 and not failed and not skipped
@@ -302,16 +320,53 @@ print('kernel memory/CPU/PID limits, noexec tmpfs, no-new-privileges, zero capab
         report = {"schema_version": 1, "run_id": self.folder.name, "started_at": self.started,
                   "finished_at": now() if finished else None, "profile": self.profile,
                   "requested_vm_count": self.vm_count, "status": status, "environment_ready": ready,
+                  "vm_timeout_seconds": self.vm_timeout,
                   "second_host_reproduction": "NOT_VERIFIED_BY_THIS_RUN",
                   "checks": self.rows, "jobs": self.jobs}
+        report["counts"] = {s: sum(r["status"] == s for r in self.rows) for s in ("PASS", "FAIL", "SKIP", "WARN")}
+        report["first_failure"] = next((r["name"] for r in self.rows if r["status"] == "FAIL"), None)
+        return report
+
+    def write_report(self, finished: bool = False) -> dict:
+        report = self.report_data(finished)
+        try:
+            self.save_report(report)
+        except OSError as exc:
+            if not any(r["name"] == "report.persistence" for r in self.rows):
+                self.rows.append({"name": "report.persistence", "status": "FAIL", "code": "REPORT_WRITE_FAILED",
+                    "evidence": str(exc), **recovery("REPORT_WRITE_FAILED")})
+                print(f"[FAIL] Report write failed: {exc}. Cleanup will still be attempted.", file=sys.stderr, flush=True)
+            report = self.report_data(finished)
+            if finished:
+                try:
+                    folder = Path(tempfile.mkdtemp(prefix="generic-agent-lab-emergency-"))
+                    atomic_json(folder / "report.json", report)
+                    self.emergency_report = str(folder / "report.json")
+                    print(f"Emergency report: {self.emergency_report}", file=sys.stderr, flush=True)
+                except OSError as fallback_error:
+                    print(f"Emergency report also failed: {fallback_error}. Preserve terminal output.", file=sys.stderr, flush=True)
+        return report
+
+    def save_report(self, report: dict):
+        status, ready = report["status"], report["environment_ready"]
         atomic_json(self.folder / "report.json", report)
         summary = [f"# Lab validation: {status}", "", f"Environment ready: **{ready}**",
                    f"Profile: `{self.profile}`; VM count: {self.vm_count}", "",
-                   "A separate run on a second host is required to prove remote reproduction.", "",
-                   "| Check | Result | Evidence / remediation |", "|---|---|---|"]
+                   "A separate run on a second host is required to prove remote reproduction.", ""]
+        failures = [r for r in self.rows if r["status"] == "FAIL"]
+        actions = []
+        for row in failures:
+            detail = row.get("remediation", "Inspect the saved failure evidence.")
+            commands = row.get("commands", [])
+            summary += [f"- **{row['name']}**: {detail}", *[f"  - `{c}`" for c in commands]]
+            actions.append(f"<li><strong>{html.escape(row['name'])}</strong>: {html.escape(detail)}"
+                           + "".join(f"<pre>{html.escape(c)}</pre>" for c in commands) + "</li>")
+        summary += ["", "| Check | Result | Evidence / remediation |", "|---|---|---|"]
         table_rows = []
         for row in self.rows:
             detail = str(row.get("evidence", "")) + (" " + row["remediation"] if row.get("remediation") else "")
+            if row.get("log"):
+                detail += " Log: " + str(self.folder / row["log"])
             summary.append(f"| {row['name']} | {row['status']} | {detail[:1000].replace('|', '/').replace(chr(10), ' ')} |")
             table_rows.append(f"<tr><td>{html.escape(row['name'])}</td><td class='{row['status']}'>{row['status']}</td>"
                               f"<td><pre>{html.escape(detail[:4000])}</pre></td></tr>")
@@ -321,12 +376,12 @@ print('kernel memory/CPU/PID limits, noexec tmpfs, no-new-privileges, zero capab
 <style>body{{font:16px system-ui;margin:3rem auto;max-width:1200px;padding:0 1rem;color:#182330;background:#f6f8fb}}
 h1{{font-size:2.5rem}}table{{width:100%;border-collapse:collapse;background:white}}td,th{{padding:1rem;text-align:left;border-bottom:1px solid #dde3ec}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;font:13px ui-monospace,monospace;margin:0}}.PASS{{color:#08784b}}.FAIL{{color:#b42318}}.SKIP,.WARN{{color:#8a5500}}td:first-child{{font-weight:600}}</style>
 <h1>Lab validation: {status}</h1><p>Environment ready: <strong>{ready}</strong> · Profile: {self.profile} · VMs: {self.vm_count}</p>
+<p>{html.escape(str(report['counts']))}</p><h2>Failures and next actions</h2><ol>{''.join(actions) or '<li>No failed checks.</li>'}</ol>
 <p>Real environment checks and simulated fault checks are recorded separately in report.json. A second host run is required to prove remote reproduction.</p>
 <table><thead><tr><th>Check</th><th>Result</th><th>Evidence / next action</th></tr></thead><tbody>{''.join(table_rows)}</tbody></table></html>"""
         (self.folder / "report.html").write_text(document)
         atomic_json(self.store.root / "reports/latest.json", {"run_id": self.folder.name, "status": status,
                                                             "environment_ready": ready})
-        return report
 
     def run(self) -> tuple[dict, int]:
         previous = signal.getsignal(signal.SIGTERM)
@@ -355,18 +410,26 @@ h1{{font-size:2.5rem}}table{{width:100%;border-collapse:collapse;background:whit
             else:
                 self.skip("vm.workflow", "Profile excludes VMs or full host/build prerequisites failed")
         except KeyboardInterrupt:
-            self.rows.append({"name": "validation.interrupted", "status": "FAIL", "evidence": "Interrupted"})
+            self.failed("validation.interrupted", LabError("INTERRUPTED", "Validation interrupted"))
         except Exception as exc:
-            self.rows.append({"name": "validation.error", "status": "FAIL", "evidence": str(exc)})
+            self.failed("validation.error", exc)
         finally:
             try:
                 self.cleanup()
             except Exception as exc:
-                self.rows.append({"name": "cleanup.error", "status": "FAIL", "evidence": str(exc)})
+                self.failed("cleanup.error", exc)
             signal.signal(signal.SIGTERM, previous)
         report = self.write_report(finished=True)
         code = 1 if report["status"] == "FAIL" else 0
         if self.profile == "full" and not report["environment_ready"]:
             code = 1
         print(f"\n{report['status']} · environment_ready={report['environment_ready']}\nReports: {self.folder}", flush=True)
+        print("Checks: " + ", ".join(f"{n} {s}" for s, n in report["counts"].items()), flush=True)
+        for row in (r for r in self.rows if r["status"] == "FAIL"):
+            print(f"  {row['name']}: {row.get('remediation', 'Inspect saved evidence.')}", flush=True)
+        if report["first_failure"]:
+            cli = operator_command()
+            print(f"Start with: {report['first_failure']}\nInspect: {cli} report --failures\nCollect: {cli} diagnose", flush=True)
+        if self.emergency_report:
+            print(f"Use emergency report: {self.emergency_report} (latest pointer may refer to an older run)", flush=True)
         return report, code

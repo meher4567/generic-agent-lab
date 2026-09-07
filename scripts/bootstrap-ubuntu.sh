@@ -5,6 +5,7 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 run_validation=false
 install_only=false
 vm_count=3
+vm_timeout=240
 while (($#)); do
   case "$1" in
     --run) run_validation=true; shift ;;
@@ -12,7 +13,12 @@ while (($#)); do
     --vm-count)
       [[ ${2:-} =~ ^[123]$ ]] || { echo '--vm-count must be 1, 2, or 3' >&2; exit 2; }
       vm_count=$2; shift 2 ;;
-    --help|-h) echo 'Usage: sudo ./scripts/bootstrap-ubuntu.sh [--run | --install-only] [--vm-count 1|2|3]'; exit 0 ;;
+    --vm-timeout)
+      if [[ ! ${2:-} =~ ^[0-9]{1,3}$ ]] || ((10#$2 < 1 || 10#$2 > 600)); then
+        echo '--vm-timeout must be 1–600 seconds'; exit 2
+      fi
+      vm_timeout=$((10#$2)); shift 2 ;;
+    --help|-h) echo 'Usage: sudo ./scripts/bootstrap-ubuntu.sh [--run | --install-only] [--vm-count 1|2|3] [--vm-timeout 1..600]'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -21,6 +27,9 @@ if $run_validation && $install_only; then
   exit 2
 fi
 [[ $EUID == 0 ]] || { echo 'Host installation requires sudo.' >&2; exit 1; }
+# shellcheck source=scripts/setup-common.sh
+source "$repo_dir/scripts/setup-common.sh"
+setup_logging bootstrap /var/log/generic-agent-lab
 # Reject unsupported hosts before making any host configuration changes.
 # shellcheck disable=SC1091
 source /etc/os-release
@@ -33,18 +42,7 @@ source /etc/os-release
 
 install_dir=/opt/generic-agent-lab
 lab_user=agentlab
-log_dir=/var/log/generic-agent-lab
-install -d -m 0755 "$log_dir"
-setup_log="$log_dir/bootstrap-$(date -u +%Y%m%dT%H%M%SZ).log"
-exec > >(tee -a "$setup_log") 2>&1
-phase=preflight
-bootstrap_failed() {
-  local code=$?
-  printf '[FAIL] Bootstrap phase %s, line %s, exit %s. Log: %s\n' "$phase" "$1" "$code" "$setup_log"
-  printf '{"status":"FAIL","phase":"%s","exit_code":%s}\n' "$phase" "$code" > "$log_dir/bootstrap.json"
-  exit "$code"
-}
-trap 'bootstrap_failed "$LINENO"' ERR
+[[ -d /run/systemd/system ]] || { echo '[FAIL] Host setup requires a running systemd system (not an ordinary container).'; exit 1; }
 if [[ -e $install_dir && ! -f $install_dir/.managed ]]; then
   echo "[FAIL] $install_dir exists without the lab ownership marker; refusing to overwrite it."
   exit 1
@@ -56,18 +54,19 @@ for target in /usr/local/bin/agentlab /etc/systemd/system/generic-agent-lab-reap
   fi
 done
 
-phase=packages
+setup_phase packages
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y software-properties-common
+apt_options=(-o DPkg::Lock::Timeout=120 -o Acquire::Retries=3 -o APT::Update::Error-Mode=any)
+apt-get "${apt_options[@]}" update
+apt-get "${apt_options[@]}" install -y software-properties-common
 add-apt-repository -y universe
-apt-get update
-apt-get install -y git python3 python3-venv python3-pip jq curl openssh-client rsync \
+apt-get "${apt_options[@]}" update
+apt-get "${apt_options[@]}" install -y git python3 python3-venv python3-pip jq curl openssh-client rsync \
   qemu-kvm qemu-utils libvirt-daemon-system libvirt-clients virtinst cloud-image-utils \
   podman uidmap fuse-overlayfs slirp4netns dbus-user-session libosinfo-bin osinfo-db \
   ubuntu-cloudimage-keyring gpgv cpu-checker make shellcheck acl
 
-phase=account
+setup_phase account
 if ! id "$lab_user" >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash "$lab_user"
 fi
@@ -85,7 +84,7 @@ loginctl enable-linger "$lab_user"
 systemctl start "user@${lab_uid}.service"
 systemctl enable --now libvirtd.service
 
-phase=network
+setup_phase network
 if ! virsh --connect qemu:///system net-list --all --name | grep -qx default; then
   network_template=/usr/share/libvirt/networks/default.xml
   [[ -f $network_template ]] || { echo '[FAIL] libvirt default network template missing.'; exit 1; }
@@ -96,7 +95,7 @@ if ! virsh --connect qemu:///system net-list --name | grep -qx default; then
 fi
 virsh --connect qemu:///system net-autostart default
 
-phase=application
+setup_phase application
 install -d -m 0755 "$install_dir" "$install_dir/source"
 setfacl -b -k "$install_dir" "$install_dir/source"
 touch "$install_dir/.managed"
@@ -110,8 +109,8 @@ chown -R root:root "$install_dir/source"
 setfacl -R -b -k "$install_dir/source"
 chmod -R a+rX,go-w "$install_dir/source"
 python3 -m venv "$install_dir/venv"
-"$install_dir/venv/bin/python" -m pip install --require-hashes -r "$install_dir/source/requirements.lock"
-"$install_dir/venv/bin/python" -m pip install --no-deps --no-build-isolation "$install_dir/source"
+"$install_dir/venv/bin/python" -m pip install --disable-pip-version-check --retries 3 --timeout 30 --require-hashes -r "$install_dir/source/requirements.lock"
+"$install_dir/venv/bin/python" -m pip install --disable-pip-version-check --no-deps --no-build-isolation "$install_dir/source"
 runtime="$lab_home/.local/share/generic-agent-lab"
 install -d -m 0700 -o "$lab_user" -g "$lab_group" "$lab_home/.local" "$lab_home/.local/share" \
   "$lab_home/.config" "$lab_home/.cache" "$runtime"
@@ -167,7 +166,7 @@ exec runuser -u agentlab -- env \
 WRAPPER
 chmod 0755 /usr/local/bin/agentlab
 
-phase=expiry_timer
+setup_phase expiry_timer
 cat > /etc/systemd/system/generic-agent-lab-reaper.service <<SERVICE
 # Managed by generic-agent-lab
 [Unit]
@@ -200,15 +199,14 @@ WantedBy=timers.target
 TIMER
 systemctl daemon-reload
 systemctl enable --now generic-agent-lab-reaper.timer
-phase=verification
-printf '{"status":"PASS","phase":"installed"}\n' > "$log_dir/bootstrap.json"
+setup_phase verification
 echo '[PASS] Ubuntu packages, dedicated account, libvirt, NAT, rootless runtime, CLI, and expiry timer installed.'
 echo "Bootstrap log: $setup_log"
 if $install_only; then
   echo 'Installation complete. Run sudo agentlab validate to test the environment.'
 elif $run_validation; then
-  phase=validation
-  agentlab validate --profile full --vm-count "$vm_count"
+  setup_phase validation
+  agentlab validate --profile full --vm-count "$vm_count" --vm-timeout "$vm_timeout"
 else
   agentlab doctor
   echo 'Run: sudo agentlab validate'

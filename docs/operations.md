@@ -36,6 +36,8 @@ configuration is not overwritten, and another account's Podman storage is retain
 ```bash
 sudo agentlab doctor --json
 sudo agentlab report
+sudo agentlab report --failures
+sudo agentlab diagnose
 sudo systemctl status libvirtd
 sudo systemctl status generic-agent-lab-reaper.timer
 sudo journalctl -u generic-agent-lab-reaper.service --no-pager -n 30
@@ -58,6 +60,11 @@ sudo journalctl -u generic-agent-lab-reaper.service --no-pager -n 30
 | `STALE_BUILD` / `WRONG_IMAGE_BINDING` | Rebuild the current source, register its image, and create a fresh VM |
 | `VM_QUOTA` | Clean up existing lab VM reservations, including failed deployments |
 | Cleanup cannot contact libvirt | Restore libvirt, then rerun cleanup; disk state is retained for safe retry |
+| `RESOURCE_BUSY` | Another operation holds a lab lock; wait for it to finish, then retry |
+| `EVENT_LOG_FAILED` | Check `operation_completed` and the returned operation result before retrying; the action may already have succeeded |
+| `INVALID_STATE` | Collect diagnostics and preserve the runtime; inspect/restore the corrupted record instead of deleting ownership evidence |
+| `REPORT_WRITE_FAILED` | Check free bytes, inodes, and permissions; use the printed emergency report path |
+| `VM_STOPPED` | Guest shut down or crashed before readiness; inspect saved state and host/libvirt diagnostics |
 
 Each job's `logs/`, `builds/`, `tests/`, `vm/*/domain.xml`, and `events.jsonl` provide
 the relevant IDs and local evidence. Runtime evidence can contain local paths, guest

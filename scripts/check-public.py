@@ -22,6 +22,7 @@ for name in filter(None, paths):
     path = PurePosixPath(name)
     if (forbidden_dirs.intersection(path.parts) or path.name.startswith(".env") or
             path.suffix in {".qcow2", ".img", ".iso", ".log", ".pem", ".key"} or
+            (path.name.startswith("diagnostics-") and path.name.endswith(".tar.gz")) or
             path.name in {"id_ed25519", "id_rsa", "Generic_Agent_Lab_Infrastructure_Setup_and_Tool_Validation_Guide.md"}):
         problems.append((name, "forbidden runtime/private file"))
         continue

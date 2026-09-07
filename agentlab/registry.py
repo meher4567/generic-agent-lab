@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from . import models as m
 from .build import BuildBroker
 from .local_tools import LocalTools
+from .recovery import error_code, recovery
 from .sandbox import Sandbox
 from .store import Store
 from .vm import TestBroker, VMBroker
@@ -73,6 +74,15 @@ class Registry:
                        "output": m.ToolResult.model_json_schema()} for name, (schema, _) in self.tools.items()}
 
     def call(self, tool: str, arguments: dict) -> m.ToolResult:
+        try:
+            result = self._call(tool, arguments)
+        except (OSError, ValueError, KeyError) as exc:
+            result = m.ToolResult(tool=tool, status="FAIL", code=error_code(exc), message=str(exc))
+        if result.status == "FAIL":
+            result.data.update(recovery(result.code, result.message + " " + str(result.data)))
+        return result
+
+    def _call(self, tool: str, arguments: dict) -> m.ToolResult:
         if tool not in self.tools:
             return m.ToolResult(tool=tool, status="FAIL", code="UNKNOWN_TOOL", message="Unknown capability")
         schema, handler = self.tools[tool]
@@ -92,13 +102,22 @@ class Registry:
                 result = m.ToolResult(tool=tool, status="FAIL", code=exc.code,
                                       message=exc.message, data=exc.data)
             except (OSError, ValueError, KeyError) as exc:
-                result = m.ToolResult(tool=tool, status="FAIL", code="INFRASTRUCTURE_ERROR",
+                result = m.ToolResult(tool=tool, status="FAIL", code=error_code(exc),
                                       message=str(exc))
             if job_id:
                 # Event metadata is outside the writable sandbox mount.
-                self.store.event(job_id, tool.upper(), status=result.status, code=result.code,
-                                 evidence={k: v for k, v in result.data.items() if k.endswith("_id")},
-                                 simulated=result.data.get("simulated", False))
+                try:
+                    self.store.event(job_id, tool.upper(), status=result.status, code=result.code,
+                                     evidence={k: v for k, v in result.data.items() if k.endswith("_id")},
+                                     simulated=result.data.get("simulated", False))
+                except OSError as exc:
+                    if result.status == "FAIL":
+                        result.data["event_logging_error"] = str(exc)
+                    else:
+                        result = m.ToolResult(tool=tool, status="FAIL", code="EVENT_LOG_FAILED",
+                            message="Operation succeeded but its event could not be recorded; inspect before retrying",
+                            data={"operation_completed": True, "operation_result": result.data,
+                                  "event_logging_error": str(exc)})
             return result
         try:
             if job_id:

@@ -55,6 +55,13 @@ jobs:
       - name: Show report
         if: always()
         run: sudo agentlab report --details
+      - name: Verify diagnostic collection, including the standalone fallback
+        if: always()
+        run: |
+          if command -v agentlab >/dev/null; then
+            sudo agentlab diagnose
+          fi
+          sudo bash scripts/diagnose.sh --output-dir "$RUNNER_TEMP/lab-diagnostics"
       - name: Show rootless startup diagnostics on failure
         if: failure()
         run: |

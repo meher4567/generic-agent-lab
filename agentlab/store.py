@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -52,11 +53,20 @@ class Store:
             self.instance = json.loads(marker.read_text())["instance"]
 
     @contextmanager
-    def lock(self, name: str):
+    def lock(self, name: str, timeout: float = 30):
         if not re.fullmatch(r"[A-Za-z0-9-]+", name):
             raise LabError("INVALID_ID", "Invalid lock identifier")
         with (self.root / f".{name}.lock").open("a") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise LabError("RESOURCE_BUSY", "Another lab operation holds this lock; retry after it finishes",
+                                       lock=name, wait_seconds=timeout) from None
+                    time.sleep(min(0.1, max(0, deadline - time.monotonic())))
             try:
                 yield
             finally:

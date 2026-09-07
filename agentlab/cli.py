@@ -1,19 +1,51 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import traceback
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 import typer
+from typer.core import TyperGroup
 
+from .diagnostics import RUN_ID, collect, redact
 from .host import verify_host
 from .models import LabError
+from .recovery import error_code, recovery
 from .registry import Registry
 from .store import Store
 from .validate import Validation
 from .vm import VMBroker
 
-app = typer.Typer(no_args_is_help=True, help="Set up and prove a generic engineering infrastructure lab.")
+
+class DiagnosticGroup(TyperGroup):
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except (typer.Exit, typer.Abort, typer.BadParameter):
+            raise
+        except (LabError, OSError, ValueError, KeyError, RuntimeError, TypeError, AssertionError) as exc:
+            code = error_code(exc)
+            value = {"status": "FAIL", "code": code, "message": redact(str(exc)),
+                     **recovery(code, str(exc))}
+            try:
+                # Independent of Store: still works when runtime setup or state loading fails.
+                folder = Path(tempfile.mkdtemp(prefix="generic-agent-lab-error-"))
+                log = folder / "error.log"
+                log.write_text(redact(traceback.format_exc()))
+                log.chmod(0o600)
+                value["log"] = str(log)
+            except OSError as log_error:
+                value["logging_error"] = str(log_error)
+            emit(value)
+            raise typer.Exit(1) from exc
+
+
+app = typer.Typer(cls=DiagnosticGroup, no_args_is_help=True,
+                  help="Set up and prove a generic engineering infrastructure lab.")
 
 
 class Profile(str, Enum):
@@ -33,7 +65,8 @@ def invoke(name: str, **arguments):
         if result.status == "FAIL":
             raise typer.Exit(1)
     except LabError as exc:
-        emit({"status": "FAIL", "code": exc.code, "message": exc.message})
+        emit({"status": "FAIL", "code": exc.code, "message": exc.message,
+              "data": exc.data, **recovery(exc.code, exc.message)})
         raise typer.Exit(1) from exc
 
 
@@ -72,42 +105,63 @@ def doctor(profile: Profile = Profile.full, vm_count: int = typer.Option(3, min=
 
 
 @app.command()
-def validate(profile: Profile = Profile.full, vm_count: int = typer.Option(3, min=1, max=3)):
+def validate(profile: Profile = Profile.full, vm_count: int = typer.Option(3, min=1, max=3),
+             vm_timeout: int = typer.Option(240, min=1, max=600)):
     """Run all selected real checks and fault tests; always save a report and clean up."""
-    _, code = Validation(Store(), profile.value, vm_count).run()
+    _, code = Validation(Store(), profile.value, vm_count, vm_timeout).run()
     raise typer.Exit(code)
 
 
 @app.command()
-def report(details: bool = False):
+def report(details: bool = False, failures: bool = False):
     """Print the latest validation result and report paths."""
     store = Store()
     pointer = store.root / "reports/latest.json"
     if not pointer.exists():
         raise typer.BadParameter("No report yet; run labctl validate")
     latest = json.loads(pointer.read_text())
-    folder = store.root / "reports" / latest["run_id"]
-    if details:
-        emit(json.loads((folder / "report.json").read_text()))
+    run_id = latest.get("run_id", "")
+    if not isinstance(run_id, str) or not RUN_ID.fullmatch(run_id):
+        raise LabError("INVALID_STATE", "Latest report contains an invalid run ID")
+    folder = store.root / "reports" / run_id
+    result = json.loads((folder / "report.json").read_text())
+    if details or failures:
+        if failures:
+            result = {"run_id": run_id, "status": result["status"],
+                      "environment_ready": result["environment_ready"],
+                      "checks": [r for r in result["checks"] if r["status"] in ("FAIL", "SKIP")],
+                      "report_directory": str(folder)}
+        emit(result)
         return
-    emit({**latest, "json": str(folder / "report.json"), "html": str(folder / "report.html"),
+    emit({**latest, **{k: result.get(k) for k in ("started_at", "finished_at", "profile", "counts", "first_failure")},
+          "json": str(folder / "report.json"), "html": str(folder / "report.html"),
           "markdown": str(folder / "summary.md")})
+
+
+@app.command()
+def diagnose(output_dir: Optional[Path] = None):
+    """Collect bounded diagnostic evidence locally, including when runtime state is broken."""
+    runtime = Path(os.environ.get("LAB_ROOT", Path.home() / ".local/share/generic-agent-lab"))
+    source = Path(os.environ.get("LAB_SOURCE_ROOT", Path(__file__).resolve().parents[1]))
+    emit(collect(runtime, output_dir, source=source))
 
 
 @app.command()
 def cleanup(job_id: Optional[str] = None):
     """Remove owned containers and VMs; retain logs, job history, and cached base image."""
     store = Store()
-    registry, vm = Registry(store), VMBroker(store)
+    registry = Registry(store)
     jobs = [job_id] if job_id else store.jobs()
     results = []
     for job in jobs:
-        for record in vm.records():
-            if record["job_id"] == job and record["status"] != "DESTROYED":
-                results.append(registry.call("vm_destroy", {"job_id": job, "vm_id": record["vm_id"]}))
-        results.append(registry.call("sandbox_destroy", {"job_id": job}))
-    emit([r.model_dump() for r in results])
-    raise typer.Exit(1 if any(r.status == "FAIL" for r in results) else 0)
+        try:
+            for folder in sorted((store.job(job) / "vm").glob("VM-*")):
+                results.append(registry.call("vm_destroy", {"job_id": job, "vm_id": folder.name}).model_dump())
+        except (LabError, OSError, ValueError) as exc:
+            results.append({"status": "FAIL", "job_id": job, "code": error_code(exc), "message": str(exc)})
+        results.append(registry.call("sandbox_destroy", {"job_id": job}).model_dump())
+    emit(results)
+    raise typer.Exit(1 if any(r["status"] == "FAIL" for r in results) else 0)
 
 
 job_app = typer.Typer(no_args_is_help=True)

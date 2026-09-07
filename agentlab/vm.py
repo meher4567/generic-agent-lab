@@ -13,9 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .build import BuildBroker
+from .diagnostics import redact
 from .models import LabError
 from .policy import read_file, sha256
 from .process import checked, run
+from .recovery import error_code
 from .store import Store, atomic_json, new_id, now
 
 URI = "qemu:///system"
@@ -262,14 +264,22 @@ class VMBroker:
                 state.current_vm_id = vm_id
                 self.store.save(state)
                 return {k: v for k, v in record.items() if k != "instance"}
-            except BaseException:
+            except BaseException as original:
                 record["status"] = "FAILED"
-                self.save_record(record)
-                # Do not mask a deployment failure if cleanup itself cannot finish.
+                secondary_errors = []
+                try:
+                    self.save_record(record)
+                except Exception as exc:
+                    secondary_errors.append(f"state recording: {exc}")
                 try:
                     self._destroy(record)
-                except Exception as cleanup_error:
-                    self.store.event(job_id, "CLEANUP_FAILED", vm_id=vm_id, error=str(cleanup_error))
+                except Exception as exc:
+                    secondary_errors.append(f"cleanup: {exc}")
+                if isinstance(original, LabError):
+                    original.data.update(vm_id=vm_id, job_id=job_id, secondary_errors=secondary_errors)
+                elif secondary_errors and isinstance(original, Exception):
+                    raise LabError(error_code(original), str(original), vm_id=vm_id,
+                                   secondary_errors=secondary_errors) from original
                 raise
 
     def status(self, job_id: str, vm_id: str) -> dict:
@@ -319,8 +329,34 @@ class VMBroker:
         deadline = time.monotonic() + timeout
         saw_ip = saw_ssh = False
         last_output = ""
+        state: dict = {}
+
+        def fail(code: str, message: str):
+            evidence = {"job_id": job_id, "vm_id": vm_id, "domain": record["domain"],
+                        "timeout_seconds": timeout, "saw_ip": saw_ip, "saw_ssh": saw_ssh,
+                        "last_state": state, "last_output": redact(last_output[-8000:])}
+            if saw_ssh and state.get("ip"):
+                try:
+                    result = run(self.ssh_args(record, state["ip"]) + [
+                        "cloud-init status --long; "
+                        "tail -n 60 /var/log/cloud-init-output.log /var/log/cloud-init.log 2>&1"],
+                        timeout=8, limit=64 * 1024)
+                    evidence["guest_diagnostics"] = {**result.model_dump(), "output": redact(result.output)}
+                except Exception as exc:
+                    evidence["diagnostic_error"] = redact(str(exc))
+            # Preserve evidence before automatic cleanup removes the guest and its keys.
+            try:
+                path = self.store.job(job_id) / "logs" / f"{vm_id}-readiness.log"
+                path.write_text(json.dumps(evidence, indent=2))
+                evidence["log_path"] = str(path)
+            except OSError as exc:
+                evidence["logging_error"] = str(exc)
+            raise LabError(code, message, **evidence)
+
         while time.monotonic() < deadline:
             state = self.status(job_id, vm_id)
+            if state.get("state") in {"shut off", "crashed"}:
+                fail("VM_STOPPED", "Guest stopped before readiness; inspect the saved VM state")
             if state["ip"]:
                 saw_ip = True
                 result = run(self.ssh_args(record, state["ip"]) + [
@@ -333,7 +369,7 @@ class VMBroker:
                     return {**state, "ssh_ready": True, "cloud_init_ready": True}
             time.sleep(min(2, max(0, deadline - time.monotonic())))
         code = "BOOT_TIMEOUT" if saw_ssh else "SSH_TIMEOUT" if saw_ip else "NO_IP"
-        raise LabError(code, "VM readiness deadline expired", last_output=last_output[-2000:])
+        fail(code, "VM readiness deadline expired")
 
     def _destroy(self, record: dict) -> dict:
         xml = self.domain_xml(record)

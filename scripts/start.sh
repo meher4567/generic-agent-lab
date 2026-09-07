@@ -7,6 +7,7 @@ case "${1:-}" in
 Usage:
   ./scripts/start.sh                      Install on Ubuntu, then run the full three-VM proof
   ./scripts/start.sh --vm-count 1         Install and run a smaller VM proof (PARTIAL, exit 1)
+  ./scripts/start.sh --vm-timeout 600     Allow more time for slow guest startup
   ./scripts/start.sh --check              Validate an already provisioned current account
   ./scripts/start.sh --sandbox            Local Python setup + real rootless sandbox tests
   ./scripts/start.sh --software           Local Python setup + unit and simulated fault tests
@@ -24,7 +25,7 @@ HELP
     [[ $profile != check ]] || profile=full
     export LAB_SOURCE_ROOT="$repo_dir"
     exec "$repo_dir/.venv/bin/labctl" validate --profile "$profile" "$@" ;;
-  ''|--vm-count)
+  ''|--vm-count|--vm-timeout)
     if [[ $EUID == 0 ]]; then
       exec bash "$repo_dir/scripts/bootstrap-ubuntu.sh" --run "$@"
     else

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import os
 import selectors
+import shlex
 import signal
 import subprocess
 import time
 
+from .diagnostics import redact
 from .models import CommandResult, LabError
 
 
@@ -89,10 +91,12 @@ def kill_group(proc) -> None:
 
 def checked(argv: list[str], **kwargs) -> CommandResult:
     result = run(argv, **kwargs)
+    context = {**result.model_dump(), "command": redact(shlex.join(argv))[:4000],
+               "timeout_seconds": kwargs.get("timeout", 30)}
     if result.timed_out:
-        raise LabError("COMMAND_TIMEOUT", f"{argv[0]} exceeded its deadline", **result.model_dump())
+        raise LabError("COMMAND_TIMEOUT", f"{argv[0]} exceeded its deadline", **context)
     if result.output_limited:
-        raise LabError("OUTPUT_LIMIT", f"{argv[0]} exceeded its output limit", **result.model_dump())
+        raise LabError("OUTPUT_LIMIT", f"{argv[0]} exceeded its output limit", **context)
     if result.returncode:
-        raise LabError("COMMAND_FAILED", f"{argv[0]} failed", **result.model_dump())
+        raise LabError("COMMAND_FAILED", f"{argv[0]} failed with exit code {result.returncode}", **context)
     return result

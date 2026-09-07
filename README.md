@@ -43,6 +43,7 @@ The first run needs internet access to Ubuntu package/image servers and the Pyth
 
 ```bash
 sudo agentlab report
+sudo agentlab report --failures
 sudo agentlab doctor
 ```
 
@@ -76,6 +77,54 @@ sudo chown -R "$(id -u):$(id -g)" reports/
 ```
 
 Reports are private runtime evidence and are ignored by Git.
+
+## If a run fails
+
+Start with the **first failed check** printed at the end of the run. The HTML report
+puts failures and recovery commands before the full check table. `report --failures`
+shows only failed/skipped checks, their error codes, evidence, and next actions.
+
+```bash
+sudo agentlab report --failures
+sudo agentlab diagnose
+```
+
+`diagnose` creates a private local `.tar.gz` bundle and prints its path. It collects
+bounded report/build/error log excerpts, disk/inode/memory checks, versions, and service
+status. It excludes keys, cloud-init user-data, workspaces, VM disks, and environment
+dumps. It redacts common credential formats; review the contents before sharing.
+Nothing is uploaded automatically. Unavailable evidence is listed in the bundle manifest.
+
+If installation failed before `agentlab` became available, run from the clone:
+
+```bash
+sudo bash scripts/diagnose.sh
+```
+
+This fallback uses standard-library Python and can read root-owned bootstrap logs.
+For a failed local `--software`/`--sandbox` setup, use `bash scripts/diagnose.sh` without
+sudo; Python setup logs are in `reports/setup/`. Add `--output-dir /path/on/another/disk`
+to either diagnostic command if the normal disk is full.
+
+Setup waits up to 120 seconds for apt's package lock and retries package downloads
+three times. An interrupted or explicitly failed setup still saves its phase and exit
+code. Concurrent setup is rejected with a clear message; busy broker locks time out
+after 30 seconds. Repeating the original start command is the recovery path after the
+reported cause is resolved. Failed builds and VM creation are not blindly retried.
+
+On a slow host, guest startup can be given up to ten minutes:
+
+```bash
+sudo agentlab validate --vm-timeout 600
+# Or during installation:
+./scripts/start.sh --vm-timeout 600
+```
+
+A guest readiness failure saves the last state/IP/SSH output and, when SSH is reachable,
+cloud-init diagnostics before cleanup. If writing reports fails, cleanup still runs
+and the tool attempts an emergency JSON report under `/tmp`; its exact path is printed.
+If both locations are unavailable, preserve the terminal output. The normal latest
+report pointer can still refer to an older run in that situation.
 
 ## Rerun and clean up
 

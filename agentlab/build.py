@@ -4,6 +4,7 @@ import json
 
 from .models import LabError
 from .policy import read_file, sha256, source_hash
+from .recovery import error_code
 from .sandbox import Sandbox
 from .store import Store, atomic_json, new_id, now
 
@@ -27,6 +28,7 @@ class BuildBroker:
         state.status, state.build_status = "RUNNING", "RUNNING"
         state.current_build_id = state.current_image_id = None
         self.store.save(state)
+        failure: BaseException | None = None
         try:
             before = source_hash(source)
             record["source_hash"] = before
@@ -55,14 +57,27 @@ class BuildBroker:
             state.current_build_id, state.current_source_hash = build_id, before
             state.build_status, state.status = "PASS", "READY"
             return record
-        except LabError as exc:
-            record.update(status="FAIL", code=exc.code, message=exc.message)
-            state.build_status, state.status = exc.code, "FAILED"
-            exc.data.update(build_id=build_id)
+        except Exception as exc:
+            failure = exc if isinstance(exc, LabError) else LabError(error_code(exc), str(exc))
+            record.update(status="FAIL", code=failure.code, message=str(failure))
+            state.build_status, state.status = failure.code, "FAILED"
+            failure.data.update(build_id=build_id)
+            raise failure
+        except KeyboardInterrupt as exc:
+            failure = exc
+            record.update(status="FAIL", code="INTERRUPTED")
+            state.build_status, state.status = "INTERRUPTED", "FAILED"
             raise
         finally:
-            atomic_json(job / "builds" / f"{build_id}.json", record)
-            self.store.save(state)
+            for save in (lambda: atomic_json(job / "builds" / f"{build_id}.json", record),
+                         lambda: self.store.save(state)):
+                try:
+                    save()
+                except OSError as exc:
+                    if failure is None:
+                        raise
+                    if isinstance(failure, LabError):
+                        failure.data.setdefault("persistence_errors", []).append(str(exc))
 
     def current(self, job_id: str) -> dict:
         state = self.store.state(job_id)

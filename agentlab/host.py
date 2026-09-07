@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .models import LabError
 from .process import checked
+from .recovery import error_code, recovery
 from .store import Store
 from .vm import URI, VM_RAM_MIB, VMBroker
 
@@ -35,8 +36,11 @@ def verify_host(store: Store, profile: str = "full", vm_count: int = 3, on_check
                 diagnostic = (exc.data.get("output", "") + exc.data.get("stderr", "")).strip()
                 if diagnostic:
                     detail += ": " + diagnostic[-4000:]
+            code = error_code(exc)
+            advice = recovery(code, detail, step=name)
             checks.append({"name": name, "status": "FAIL" if required else "WARN", "required": required,
-                           "evidence": detail, "remediation": fix})
+                           "evidence": detail, "code": code, "remediation": fix,
+                           "commands": advice["commands"]})
         if on_check:
             on_check(checks[-1])
 

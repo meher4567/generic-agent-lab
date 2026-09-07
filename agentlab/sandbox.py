@@ -77,10 +77,15 @@ class Sandbox:
         result = run(command, timeout=timeout + 10, input_text=input_text)
         if result.timed_out or result.output_limited or result.returncode in (124, 137):
             # Killing the client alone would leave a container exec running.
-            checked(["podman", "stop", "--time", "1", self.name(job_id)], timeout=20)
+            cleanup_error = None
+            try:
+                checked(["podman", "stop", "--time", "1", self.name(job_id)], timeout=20)
+            except (LabError, OSError) as exc:
+                cleanup_error = str(exc)
             raise LabError("BUILD_TIMEOUT" if result.returncode in (124, 137) or result.timed_out
-                           else "OUTPUT_LIMIT", "Sandbox stopped after execution limit",
-                           **result.model_dump())
+                           else "OUTPUT_LIMIT", "Sandbox stop failed after execution limit; cleanup required"
+                           if cleanup_error else "Sandbox stopped after execution limit",
+                           cleanup_error=cleanup_error, **result.model_dump())
         return result
 
     def destroy(self, job_id: str) -> dict:
