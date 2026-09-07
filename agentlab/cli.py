@@ -150,13 +150,20 @@ def diagnose(output_dir: Optional[Path] = None):
 def cleanup(job_id: Optional[str] = None):
     """Remove owned containers and VMs; retain logs, job history, and cached base image."""
     store = Store()
-    registry = Registry(store)
+    registry, vm = Registry(store), VMBroker(store)
     jobs = [job_id] if job_id else store.jobs()
     results = []
     for job in jobs:
         try:
             for folder in sorted((store.job(job) / "vm").glob("VM-*")):
-                results.append(registry.call("vm_destroy", {"job_id": job, "vm_id": folder.name}).model_dump())
+                try:
+                    record = vm.record(job, folder.name)
+                    if record["status"] != "DESTROYED":
+                        results.append(registry.call("vm_destroy", {"job_id": job, "vm_id": folder.name}).model_dump())
+                except (LabError, OSError, ValueError, KeyError) as exc:
+                    code = error_code(exc)
+                    results.append({"status": "FAIL", "job_id": job, "vm_id": folder.name,
+                                    "code": code, "message": str(exc), **recovery(code, str(exc))})
         except (LabError, OSError, ValueError) as exc:
             results.append({"status": "FAIL", "job_id": job, "code": error_code(exc), "message": str(exc)})
         results.append(registry.call("sandbox_destroy", {"job_id": job}).model_dump())

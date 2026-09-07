@@ -122,6 +122,20 @@ def test_corrupt_vm_record_does_not_prevent_sandbox_cleanup(store, vm_record, mo
     assert validation.rows[0]["status"] == "FAIL" and validation.rows[1]["status"] == "PASS"
 
 
+def test_manual_cleanup_skips_destroyed_history_even_when_hypervisor_is_offline(store, vm_record, monkeypatch):
+    monkeypatch.setenv("LAB_ROOT", str(store.root))
+    vm_record["status"] = "DESTROYED"
+    VMBroker(store).save_record(vm_record)
+
+    def unavailable(*a, **k):
+        pytest.fail("Already-cleaned VM history must not require a hypervisor connection")
+
+    monkeypatch.setattr("agentlab.vm.virsh", unavailable)
+    monkeypatch.setattr(Sandbox, "destroy", lambda *a, **k: {"verified_absent": True})
+    result = CliRunner().invoke(app, ["cleanup"])
+    assert result.exit_code == 0 and all(r["status"] == "PASS" for r in json.loads(result.stdout))
+
+
 def test_vm_timeout_preserves_cloud_init_and_ssh_evidence(store, vm_record, monkeypatch):
     broker = VMBroker(store)
     monkeypatch.setattr(broker, "status", lambda *a: {"state": "running", "ip": "192.168.122.2"})
