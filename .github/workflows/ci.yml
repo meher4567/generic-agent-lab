@@ -40,7 +40,11 @@ jobs:
       - name: Run real rootless sandbox validation
         run: sudo agentlab validate --profile sandbox
       - name: Confirm installer reruns cleanly
-        run: sudo bash scripts/bootstrap-ubuntu.sh --install-only
+        run: |
+          sudo mkdir -p /opt/generic-agent-lab/source/build
+          sudo touch /opt/generic-agent-lab/source/build/stale-module.txt
+          sudo bash scripts/bootstrap-ubuntu.sh --install-only
+          test ! -e /opt/generic-agent-lab/source/build/stale-module.txt
       - name: Show report
         if: always()
         run: sudo agentlab report

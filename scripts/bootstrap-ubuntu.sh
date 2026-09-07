@@ -99,7 +99,7 @@ virsh --connect qemu:///system net-autostart default
 phase=application
 install -d -m 0755 "$install_dir" "$install_dir/source"
 touch "$install_dir/.managed"
-rsync -a --delete \
+rsync -a --delete --delete-excluded \
   --exclude='__pycache__' --exclude='*.pyc' \
   --include='/agentlab/***' --include='/containers/***' --include='/scripts/***' \
   --include='/tests/***' --include='/docs/***' --include='/pyproject.toml' \

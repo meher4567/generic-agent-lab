@@ -15,6 +15,7 @@ Implementation validation performed on 2026-09-08:
 | Guest image/artifact binding and toy smoke suite | Passed |
 | Controlled VM faults and actual wrong-binding rejection | Passed |
 | Owned VM/container cleanup and base preservation | Passed |
+| Fresh public Git clone, local setup command, and software tests | Passed |
 | Full three-VM acceptance on a suitably sized Ubuntu host | Requires the target-host run |
 | Second-host full reproduction | Requires a separate target host |
 
