@@ -64,7 +64,7 @@ def verify_host(store: Store, profile: str = "full", vm_count: int = 3, on_check
               "Run the Ubuntu bootstrap.")
 
     def podman_info():
-        info = json.loads(checked(["podman", "info", "--format", "json"]).output)
+        info = json.loads(checked(["podman", "info", "--format", "json"], separate_stderr=True).output)
         require(info["host"]["security"]["rootless"], "Podman must run rootlessly")
         require(info["host"]["cgroupVersion"] == "v2", "Cgroups v2 is required for resource limits")
         return {"rootless": True, "cgroup_version": "v2", "version": info["version"]["Version"]}
@@ -118,7 +118,7 @@ def verify_host(store: Store, profile: str = "full", vm_count: int = 3, on_check
     def network():
         active = checked(["virsh", "-c", URI, "net-list", "--name"]).output.splitlines()
         require("default" in active, "Default network must be active")
-        xml = ET.fromstring(checked(["virsh", "-c", URI, "net-dumpxml", "default"]).output)
+        xml = ET.fromstring(checked(["virsh", "-c", URI, "net-dumpxml", "default"], separate_stderr=True).output)
         require(xml.find("./ip/dhcp/range") is not None, "Default network must provide DHCP")
         forward = xml.find("forward")
         require(forward is not None and forward.get("mode") == "nat", "Default network must use NAT")

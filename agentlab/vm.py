@@ -94,7 +94,7 @@ class VMBroker:
                         timeout=1900)
                 if file_hash(image) != expected:
                     raise LabError("BASE_HASH_MISMATCH", "Cloud image does not match signed SHA256SUMS; retry")
-                info = json.loads(checked(["qemu-img", "info", "--output=json", str(image)]).output)
+                info = json.loads(checked(["qemu-img", "info", "--output=json", str(image)], separate_stderr=True).output)
                 if info["format"] != "qcow2" or info.get("backing-filename"):
                     raise LabError("IMAGE_FORMAT_DENIED", "Expected a standalone qcow2 base")
                 image.chmod(0o444)
@@ -419,7 +419,7 @@ assert add(2, 3) == 5
 print(json.dumps(dict(status='PASS', python=sys.version.split()[0], **expected)))
 '''
             result = checked(self.vm.ssh_args(record, ready["ip"]) + ["python3 -"],
-                             input_text=script, timeout=60)
+                             input_text=script, timeout=60, separate_stderr=True)
             output = json.loads(result.output)
             if output.get("status") != "PASS":
                 raise LabError("GUEST_TEST_FAILED", "Guest did not return passing evidence")

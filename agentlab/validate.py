@@ -87,7 +87,7 @@ class Validation:
         result = checked(["podman", "build", "--tag", SANDBOX_IMAGE, "--file",
                           str(source / "containers/Containerfile"), str(source)], timeout=1200)
         (self.folder / "sandbox-image.log").write_text(result.output)
-        return json.loads(checked(["podman", "image", "inspect", SANDBOX_IMAGE]).output)[0]["Id"]
+        return json.loads(checked(["podman", "image", "inspect", SANDBOX_IMAGE], separate_stderr=True).output)[0]["Id"]
 
     def sandbox_script(self, job_id: str, script: str) -> dict:
         result = Sandbox(self.store).execute(job_id, ["python3", "-c", script])

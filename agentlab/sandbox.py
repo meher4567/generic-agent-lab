@@ -26,7 +26,7 @@ class Sandbox:
         if exists.returncode or exists.timed_out:
             raise LabError("PODMAN_UNAVAILABLE", "Could not query container ownership",
                            **exists.model_dump())
-        data = json.loads(checked(["podman", "inspect", name]).output)[0]
+        data = json.loads(checked(["podman", "inspect", name], separate_stderr=True).output)[0]
         labels = data.get("Config", {}).get("Labels", {})
         if (labels.get("lab.instance") != self.store.instance or
                 labels.get("lab.job") != job_id):
@@ -36,7 +36,7 @@ class Sandbox:
     def create(self, job_id: str) -> dict:
         if os.geteuid() == 0:
             raise LabError("ROOT_DENIED", "Run the control plane as the dedicated non-root user")
-        info = json.loads(checked(["podman", "info", "--format", "json"]).output)
+        info = json.loads(checked(["podman", "info", "--format", "json"], separate_stderr=True).output)
         if not info["host"]["security"]["rootless"]:
             raise LabError("ROOTLESS_REQUIRED", "Rootless Podman is required")
         existing = self.inspect(job_id)
@@ -56,7 +56,7 @@ class Sandbox:
             "--volume", f"{job / 'workspace'}:/job:rw,Z",
             "--volume", f"{job / 'reference'}:/reference:ro,Z",
             SANDBOX_IMAGE,
-        ], timeout=120)
+        ], timeout=120, separate_stderr=True)
         record = {"container_id": result.output.strip(), "image": SANDBOX_IMAGE}
         atomic_json(job / "sandbox.json", record)
         state = self.store.state(job_id)
