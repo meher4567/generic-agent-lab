@@ -30,8 +30,13 @@ def verify_host(store: Store, profile: str = "full", vm_count: int = 3, on_check
             checks.append({"name": name, "status": "PASS", "required": required,
                            "evidence": evidence, "remediation": ""})
         except (LabError, OSError, ValueError, KeyError, AssertionError) as exc:
+            detail = str(exc)
+            if isinstance(exc, LabError):
+                diagnostic = (exc.data.get("output", "") + exc.data.get("stderr", "")).strip()
+                if diagnostic:
+                    detail += ": " + diagnostic[-4000:]
             checks.append({"name": name, "status": "FAIL" if required else "WARN", "required": required,
-                           "evidence": str(exc), "remediation": fix})
+                           "evidence": detail, "remediation": fix})
         if on_check:
             on_check(checks[-1])
 
