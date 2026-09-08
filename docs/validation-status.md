@@ -1,5 +1,30 @@
 # Validation status
 
+## Ubuntu 22.04 compatibility and staged recovery
+
+Commit `ddef475c741d58f97ccf5399d0e861b6658e5210` passed the
+[Ubuntu 22.04 / 24.04 workflow](https://github.com/meher4567/generic-agent-lab/actions/runs/34184097989).
+
+| Host | Runtime | Full result | Real concurrent guests |
+|---|---|---|---|
+| Ubuntu 22.04 | Rootless Podman 3.4.4, overlay, CPU/memory/PID controllers available | 101 PASS, 0 FAIL, 0 SKIP, 0 WARN; `environment_ready: true` | 3 |
+| Ubuntu 24.04 | Rootless Podman 4.9.3, overlay, CPU/memory/PID controllers available | 101 PASS, 0 FAIL, 0 SKIP, 0 WARN; `environment_ready: true` | 3 |
+
+Both hosts passed the actual installer, real sandbox workflow, guest artifact smoke
+tests, diagnostic collection, owned-resource cleanup, and repeat installation. The
+validation run IDs are `RUN-273521311d1147b4b51c825cf5e901ab` (22.04) and
+`RUN-22c19e2ab32f4373b485920f731a2559` (24.04).
+
+The software matrix passed 82 tests on Python 3.10, 3.12, and 3.13. Additional tests
+cover older Podman cleanup flags, missing CPU delegation, transient readiness recovery
+within a shared time budget, permanent errors that must not retry, and hardware-profile
+fallback with older osinfo catalogs. Both real hosts selected the available `ubuntu24.04`
+hardware profile; the `ubuntu22.04` catalog fallback was verified in regression tests.
+The local real Podman integration suite also passed (2 tests).
+
+See [Ubuntu compatibility and staged recovery](ubuntu-compatibility.md) for the supported
+release scope and automatic versus operator-assisted recovery paths.
+
 ## Error handling update
 
 Commit `576aa3a3603ca2f45402452dea6618a17d82c465` passed the
