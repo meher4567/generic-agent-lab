@@ -80,8 +80,29 @@ lab_group=$(id -gn "$lab_user")
 lab_home=$(getent passwd "$lab_user" | cut -d: -f6)
 [[ $lab_uid != 0 && $lab_home == /home/agentlab ]] || { echo '[FAIL] Unexpected agentlab account configuration.'; exit 1; }
 python3 "$repo_dir/scripts/configure-subids.py" "$lab_user"
+setup_phase rootless_controllers
+# Ubuntu 22.04 may delegate only memory/pids by default. Scope this override to
+# this dedicated account; other users' service configuration is left alone.
+delegate_dir="/etc/systemd/system/user@${lab_uid}.service.d"
+delegate_file="$delegate_dir/70-generic-agent-lab.conf"
+if [[ -e $delegate_file ]] && ! grep -q 'Managed by generic-agent-lab' "$delegate_file"; then
+  echo "[FAIL] Unmanaged delegation configuration exists: $delegate_file"; exit 1
+fi
+install -d -m 0755 "$delegate_dir"
+cat > "$delegate_file" <<'DELEGATE'
+# Managed by generic-agent-lab
+[Service]
+Delegate=cpu cpuset io memory pids
+DELEGATE
+systemctl daemon-reload
 loginctl enable-linger "$lab_user"
 systemctl start "user@${lab_uid}.service"
+# Apply the same setting to an already-running user manager without stopping its
+# containers. The persistent override above also applies on the next boot.
+if ! systemctl set-property --runtime "user@${lab_uid}.service" 'Delegate=cpu cpuset io memory pids'; then
+  echo '[WARN] Live controller delegation could not be applied. Host validation will check actual availability.'
+  echo 'If CPU delegation still fails, clean lab resources and reboot to load the installed user-service override.'
+fi
 systemctl enable --now libvirtd.service
 
 setup_phase network

@@ -363,6 +363,9 @@ class VMBroker:
                     "test -f /var/lib/cloud/instance/lab-ready"],
                     timeout=min(10, max(0.1, deadline - time.monotonic())))
                 last_output = result.output
+                if any(message in last_output for message in (
+                        "REMOTE HOST IDENTIFICATION HAS CHANGED", "Host key verification failed")):
+                    fail("SSH_HOST_KEY_MISMATCH", "Pinned SSH host identity check failed; readiness retry is unsafe")
                 if result.returncode != 255 and not result.timed_out:
                     saw_ssh = True
                 if result.returncode == 0 and not result.timed_out:

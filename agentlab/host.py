@@ -54,7 +54,7 @@ def verify_host(store: Store, profile: str = "full", vm_count: int = 3, on_check
     check("host.ubuntu", lambda: require(os_release.get("ID", "").strip('"') == "ubuntu" and
           os_release.get("VERSION_ID", "").strip('"') in ("22.04", "24.04"),
           "Supported host: Ubuntu 22.04/24.04; detected " + os_release.get("PRETTY_NAME", "unknown")),
-          "Use an Ubuntu 24.04 x86_64 host for the full environment proof.", profile == "full")
+          "Use an Ubuntu 22.04 or 24.04 x86_64 host for the full environment proof.", profile == "full")
     check("host.architecture", lambda: require(platform.machine() == "x86_64", platform.machine()),
           "The supplied guest profile targets x86_64.", profile == "full")
     check("host.nonroot", lambda: require(os.geteuid() != 0, f"Effective UID: {os.geteuid()}"),
@@ -71,8 +71,12 @@ def verify_host(store: Store, profile: str = "full", vm_count: int = 3, on_check
         info = json.loads(checked(["podman", "info", "--format", "json"], separate_stderr=True).output)
         require(info["host"]["security"]["rootless"], "Podman must run rootlessly")
         require(info["host"]["cgroupVersion"] == "v2", "Cgroups v2 is required for resource limits")
+        controllers = info["host"].get("cgroupControllers", [])
+        missing = sorted({"cpu", "memory", "pids"} - set(controllers))
+        if missing:
+            raise LabError("CGROUP_DELEGATION_MISSING", "Missing delegated controllers: " + ", ".join(missing))
         return {"rootless": True, "cgroup_version": "v2", "version": info["version"]["Version"],
-                "storage_driver": info["store"]["graphDriverName"]}
+                "controllers": controllers, "storage_driver": info["store"]["graphDriverName"]}
     check("host.rootless_podman", podman_info, "Run bootstrap and use a fresh login/session for the lab user.")
     username = pwd.getpwuid(os.getuid()).pw_name
     for kind in ("subuid", "subgid"):

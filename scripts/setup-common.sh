@@ -49,6 +49,11 @@ setup_finished() {
         echo 'Check Python/venv availability, disk space, and package-index connectivity. Downloads use bounded retries.' ;;
       account)
         echo 'Check the agentlab account configuration and that this host boots with systemd.' ;;
+      rootless_controllers)
+        echo 'The lab requires cgroups v2 with CPU, memory and PID controllers delegated to its user manager.'
+        # shellcheck disable=SC2016
+        echo 'Inspect: sudo systemctl show "user@$(id -u agentlab).service" -p Delegate -p DelegateControllers'
+        echo 'The dedicated-user override is installed under /etc/systemd/system/user@UID.service.d/.' ;;
       network)
         echo 'Inspect: sudo systemctl status libvirtd --no-pager'
         echo 'Inspect: sudo virsh -c qemu:///system net-info default'

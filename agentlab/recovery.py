@@ -34,6 +34,9 @@ def recovery(code: str, message: str = "", *, step: str = "") -> dict:
         commands = ["df -h", "df -i", *inspect]
     elif code == "RESOURCE_BUSY":
         advice = "Another lab operation is still using this resource. Let it finish, then retry; avoid starting concurrent setup or validation commands."
+    elif code == "CGROUP_DELEGATION_MISSING":
+        advice = "Rerun scripts/start.sh to delegate CPU, memory and PID controllers to the dedicated lab account. If the running user manager cannot apply it live, clean up lab workloads and reboot before retrying. Resource limits remain required."
+        commands = [f"{cli} doctor", f"{cli} cleanup", *inspect]
     elif any(s in text for s in ("could not resolve", "temporary failure resolving", "name resolution")):
         advice = "DNS lookup failed. Check the host DNS/proxy connection, then repeat setup or validation."
         commands = ["getent hosts archive.ubuntu.com pypi.org cloud-images.ubuntu.com", *inspect]
@@ -51,6 +54,9 @@ def recovery(code: str, message: str = "", *, step: str = "") -> dict:
         advice = "Read the saved readiness evidence: VM state, DHCP address, last SSH result, and cloud-init output when reachable. Check libvirt/NAT first."
         commands = ["sudo systemctl status libvirtd --no-pager", f"{cli} doctor",
                     f"{cli} validate --vm-timeout 600", *inspect]
+    elif code == "SSH_HOST_KEY_MISMATCH":
+        advice = "The guest did not present its pinned host key. Preserve the diagnostic evidence, verify the VM/IP binding, and create a fresh owned VM after cleanup. Keep strict SSH host checking enabled."
+        commands = [f"{cli} cleanup", *inspect]
     elif code in {"BUILD_TIMEOUT", "OUTPUT_LIMIT"}:
         advice = "Inspect the saved build output and host memory. A new validation run creates fresh jobs and sandboxes."
         commands = ["free -h", *inspect]

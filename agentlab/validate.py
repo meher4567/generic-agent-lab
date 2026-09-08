@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import os
 import signal
 import sys
@@ -255,6 +256,28 @@ print('kernel memory/CPU/PID limits, noexec tmpfs, no-new-privileges, zero capab
             raise LabError("ASSERTION_FAILED", "Expected condition was false")
         return {"verified": True}
 
+    def wait_vm(self, job_id: str, vm_id: str) -> dict:
+        """Two readiness stages share one time budget; only transient readiness errors retry."""
+        deadline = time.monotonic() + self.vm_timeout
+        attempts = []
+        for attempt in (1, 2):
+            remaining = max(1, math.ceil(deadline - time.monotonic()))
+            budget = min(remaining, math.ceil(self.vm_timeout / 2)) if attempt == 1 else remaining
+            try:
+                ready = self.call("vm_wait", job_id=job_id, vm_id=vm_id, timeout=budget)
+                attempts.append({"attempt": attempt, "timeout_seconds": budget, "status": "PASS"})
+                return {**ready, "readiness_attempts": attempts, "recovered_after_retry": attempt > 1}
+            except LabError as exc:
+                attempts.append({"attempt": attempt, "timeout_seconds": budget, "status": "FAIL",
+                    "code": exc.code, "message": exc.message,
+                    **{k: exc.data[k] for k in ("saw_ip", "saw_ssh", "last_state", "last_output", "log_path") if k in exc.data}})
+                if (exc.code not in {"NO_IP", "SSH_TIMEOUT", "BOOT_TIMEOUT"} or
+                        attempt == 2 or time.monotonic() >= deadline):
+                    exc.data["readiness_attempts"] = attempts
+                    raise
+                print(f"[RETRY] {vm_id}: {exc.code}; continuing readiness checks within the remaining time budget", flush=True)
+        raise AssertionError("Readiness stages exhausted without a result")
+
     def vm_workflow(self, job_id: str):
         if not self.step("image.signed_base_download", VMBroker(self.store).prepare_base):
             return
@@ -277,8 +300,7 @@ print('kernel memory/CPU/PID limits, noexec tmpfs, no-new-privileges, zero capab
             self.skip("vm.quota_enforced", "Real three-VM quota boundary requires --vm-count 3")
         for index, vm in enumerate(machines, 1):
             args = {"job_id": job_id, "vm_id": vm["vm_id"]}
-            ready = self.step(f"vm.{index}.dhcp_ssh_cloud_init", lambda a=args:
-                              self.call("vm_wait", timeout=self.vm_timeout, **a))
+            ready = self.step(f"vm.{index}.dhcp_ssh_cloud_init", lambda a=args: self.wait_vm(**a))
             if ready:
                 self.step(f"vm.{index}.profile_limits", lambda r=ready: self.assertion(
                     r["ram_mib"] == 1536 and r["vcpus"] == 1))

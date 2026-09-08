@@ -91,7 +91,8 @@ class Sandbox:
     def destroy(self, job_id: str) -> dict:
         info = self.inspect(job_id)
         if info:
-            checked(["podman", "rm", "--force", "--time", "1", self.name(job_id)], timeout=30)
+            # Podman 3.x (Ubuntu 22.04) does not support `rm --time`.
+            checked(["podman", "rm", "--force", self.name(job_id)], timeout=30)
         if self.inspect(job_id) is not None:
             raise LabError("CLEANUP_FAILED", "Job sandbox still exists")
         return {"removed": bool(info), "verified_absent": True}
