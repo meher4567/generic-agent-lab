@@ -11,8 +11,9 @@ two separate Ubuntu runner instances. See the
 
 ## Start on a clean Ubuntu host
 
-Use **Ubuntu 24.04 LTS, x86_64**, with hardware or nested virtualization enabled.
-Ubuntu 22.04 is also supported by the installer. The full acceptance profile requires
+Use **Ubuntu 22.04 LTS or 24.04 LTS, x86_64**, with hardware or nested virtualization enabled.
+See [Ubuntu compatibility and staged recovery](docs/ubuntu-compatibility.md) for release
+differences and the fallback sequence. The full acceptance profile requires
 at least 4 logical CPUs, approximately 16 GB RAM, 80 GiB free on both the runtime and VM
 storage filesystems, and approximately 5.5 GiB currently available RAM for three guests.
 If both paths share one filesystem, the 80 GiB requirement is not additive.
@@ -121,7 +122,9 @@ sudo agentlab validate --vm-timeout 600
 ```
 
 A guest readiness failure saves the last state/IP/SSH output and, when SSH is reachable,
-cloud-init diagnostics before cleanup. If writing reports fails, cleanup still runs
+cloud-init diagnostics before cleanup. Readiness uses two stages within the configured
+time budget; only temporary DHCP/SSH/cloud-init timeouts get a second attempt. Identity
+mismatches and stopped guests fail immediately. If writing reports fails, cleanup still runs
 and the tool attempts an emergency JSON report under `/tmp`; its exact path is printed.
 If both locations are unavailable, preserve the terminal output. The normal latest
 report pointer can still refer to an older run in that situation.

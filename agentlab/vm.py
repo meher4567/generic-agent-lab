@@ -43,6 +43,14 @@ def file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
+def select_os_variant(listing: str) -> dict:
+    available = set(listing.split())
+    for name in ("ubuntu24.04", "ubuntu22.04"):
+        if name in available:
+            return {"os_variant": name, "os_variant_fallback": name != "ubuntu24.04"}
+    raise LabError("OSINFO_MISSING", "Update osinfo-db; Ubuntu 22.04/24.04 hardware profile is required")
+
+
 class VMBroker:
     def __init__(self, store: Store):
         self.store = store
@@ -236,13 +244,11 @@ class VMBroker:
                 (disk_dir / "seed.iso").chmod(0o600)
                 (disk_dir / "overlay.qcow2").chmod(0o600)
                 os_list = checked(["osinfo-query", "os"]).output
-                variant = next((name for name in ("ubuntu24.04", "ubuntu22.04") if name in os_list), None)
-                if not variant:
-                    raise LabError("OSINFO_MISSING", "Update osinfo-db; Ubuntu 22.04/24.04 profile is required")
+                record.update(select_os_variant(os_list))
                 result = checked([
                     "virt-install", "--connect", URI, "--name", record["domain"], "--uuid", vm_uuid,
                     "--memory", str(VM_RAM_MIB), "--vcpus", "1", "--cpu", "host-model",
-                    "--virt-type", "kvm", "--arch", "x86_64", "--import", "--os-variant", variant,
+                    "--virt-type", "kvm", "--arch", "x86_64", "--import", "--os-variant", record["os_variant"],
                     "--disk", f"path={disk_dir / 'overlay.qcow2'},format=qcow2,bus=virtio",
                     "--disk", f"path={disk_dir / 'seed.iso'},device=cdrom",
                     "--network", f"network=default,model=virtio,mac={record['mac']}",

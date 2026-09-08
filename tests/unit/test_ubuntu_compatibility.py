@@ -6,7 +6,21 @@ from agentlab.host import verify_host
 from agentlab.models import CommandResult, LabError
 from agentlab.sandbox import Sandbox
 from agentlab.validate import Validation
-from agentlab.vm import VMBroker
+from agentlab.vm import VMBroker, select_os_variant
+
+
+@pytest.mark.parametrize("catalog,expected,fallback", [
+    ("ubuntu22.04 | Ubuntu 22.04\nubuntu24.04 | Ubuntu 24.04", "ubuntu24.04", False),
+    ("ubuntu22.04 | Ubuntu 22.04", "ubuntu22.04", True),
+])
+def test_hardware_profile_falls_back_on_older_osinfo_catalog(catalog, expected, fallback):
+    assert select_os_variant(catalog) == {"os_variant": expected, "os_variant_fallback": fallback}
+
+
+def test_unknown_or_partial_hardware_profile_names_are_not_guessed():
+    with pytest.raises(LabError) as error:
+        select_os_variant("ubuntu22.04-unsupported custom ubuntu24.04-unknown")
+    assert error.value.code == "OSINFO_MISSING"
 
 
 @pytest.mark.parametrize("controllers,expected", [(["memory", "pids"], "FAIL"), (["cpu", "memory", "pids"], "PASS")])
