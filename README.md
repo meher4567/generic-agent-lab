@@ -8,6 +8,9 @@ fixture. It includes no model, API key requirement, production source, or produc
 The full Ubuntu workflow has passed 101 checks with three real KVM guests on both
 Ubuntu 22.04 and Ubuntu 24.04. See the
 [validation record](docs/validation-status.md) for the tested revision and CI evidence.
+The [detailed implementation and troubleshooting report](docs/implementation-and-troubleshooting-report.md)
+explains what was built, the issues encountered and fixes, the test results, and how to
+run and debug the lab on a new Ubuntu host.
 
 ## Start on a clean Ubuntu host
 
